@@ -143,8 +143,8 @@ const SIM_HZ = 360;
 const STEP = 1000 / SIM_HZ;   // Dauer eines Schritts in Millisekunden
 const MAX_STEPS = 32;         // Obergrenze pro Frame (reicht bis ca. 11 fps)
 
-const WIDTH = 500;
-const HEIGHT = 700;
+const WIDTH = 400;
+const HEIGHT = 600;
 const GROUND = 96;
 
 // ---- Deine Physik, unverändert (Einheiten: pro Simulationsschritt) ----
