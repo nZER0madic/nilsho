@@ -148,15 +148,15 @@ const HEIGHT = 700;
 const GROUND = 96;
 
 // ---- Deine Physik, unverändert (Einheiten: pro Simulationsschritt) ----
-const GRAVITY = 0.02; //default 0.02
-const JUMP = -2.5; //default -2.5
-const MAX_FALL = 7.5; //default 7.5
+const GRAVITY = 0.018; //default 0.02
+const JUMP = -2.4; //default -2.5
+const MAX_FALL = 7.0; //default 7.5
 
 const PLANE_X = 90; //default 90
 const PLANE_R = 15; //default 15 - Trefferradius (das Flugzeug ist breiter als hoch)
 const TOWER_W = 70; //default 70
 const TOWER_GAP = 200; //default 200
-const TOWER_SPEED = 1.0; //default 1.0
+const TOWER_SPEED = 0.95; //default 1.0
 const TOWER_DIST = 400; //default 400
 
 // ---- Explosion, ebenfalls auf den Simulationstakt bezogen ----
@@ -669,7 +669,7 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex w-full max-w-3xl flex-col items-center gap-6 px-6 py-16">
         <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-zinc-50">
-          Skyline Dash
+          9-11-Simulator
         </h1>
 
         <div
