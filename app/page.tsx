@@ -135,20 +135,41 @@ export default function Home() {
 // Spiel
 // ---------------------------------------------------------------------------
 
+// ---- Simulationstakt ----
+// Deine Werte wurden bei 360 Bildern pro Sekunde eingestellt. Damit sie
+// unverändert gültig bleiben, rechnet die Simulation intern weiterhin
+// 360 Schritte pro Sekunde – unabhängig davon, wie oft gezeichnet wird.
+const SIM_HZ = 360;
+const STEP = 1000 / SIM_HZ;   // Dauer eines Schritts in Millisekunden
+const MAX_STEPS = 32;         // Obergrenze pro Frame (reicht bis ca. 11 fps)
+
 const WIDTH = 500;
 const HEIGHT = 700;
 const GROUND = 96;
 
-const GRAVITY = 0.02;
-const JUMP = -2.5;
-const MAX_FALL = 7.5;
+// ---- Deine Physik, unverändert (Einheiten: pro Simulationsschritt) ----
+const GRAVITY = 0.02; //default 0.02
+const JUMP = -2.5; //default -2.5
+const MAX_FALL = 7.5; //default 7.5
 
-const PLANE_X = 90;
-const PLANE_R = 15;      // Trefferradius (das Flugzeug ist breiter als hoch)
-const TOWER_W = 70;
-const TOWER_GAP = 200;
-const TOWER_SPEED = 1.0;
-const TOWER_DIST = 400;
+const PLANE_X = 90; //default 90
+const PLANE_R = 15; //default 15 - Trefferradius (das Flugzeug ist breiter als hoch)
+const TOWER_W = 70; //default 70
+const TOWER_GAP = 200; //default 200
+const TOWER_SPEED = 1.0; //default 1.0
+const TOWER_DIST = 400; //default 400
+
+// ---- Explosion, ebenfalls auf den Simulationstakt bezogen ----
+const EXPL_ANZAHL = 34;
+const EXPL_GRAVITY = 0.14 / 36;      // Schwerkraft der Funken pro Schritt
+const EXPL_DRAG = Math.pow(0.97, 1 / 6);   // Luftwiderstand pro Schritt
+const EXPL_SHRINK = Math.pow(0.975, 1 / 6); // Schrumpfen pro Schritt
+const EXPL_LEBEN_MIN = 26 * 6;       // Lebensdauer in Schritten
+const EXPL_LEBEN_SPAN = 22 * 6;
+const EXPL_MAX_LEBEN = 48 * 6;
+const EXPL_BLITZ = 5 * 6;            // Dauer des weißen Blitzes
+const EXPL_RING = 24 * 6;            // Dauer der Druckwelle
+const EXPL_BALL = 16 * 6;            // Dauer des Feuerballs
 
 const C = {
   himmel: "#5bb7d6",
@@ -229,19 +250,21 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
 
   const plane = useRef({ y: HEIGHT / 2, v: 0 });
   const towers = useRef<Tower[]>([]);
-  const frame = useRef(0);
   const groundX = useRef(0);
   const bgX = useRef(0);
 
-  // Explosion: Funkenliste plus Zähler für Blitz und Druckwelle
+  // Simulationszeit in Sekunden – Grundlage aller Animationen,
+  // damit Propeller, Blinklicht und Schweben überall gleich schnell laufen.
+  const simZeit = useRef(0);
+
   const funken = useRef<Funke[]>([]);
-  const explosionFrame = useRef(0);
+  const explosionSchritt = useRef(0);
 
   const reset = useCallback(() => {
     plane.current = { y: HEIGHT / 2, v: 0 };
     towers.current = [];
     funken.current = [];
-    explosionFrame.current = 0;
+    explosionSchritt.current = 0;
     scoreRef.current = 0;
     setScore(0);
   }, []);
@@ -276,21 +299,26 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
     if (!ctx) return;
     let raf = 0;
 
-    // Erzeugt die Funken an der Aufprallstelle
+    // Himmelsverlauf nur einmal anlegen, nicht in jedem Bild neu
+    const himmelVerlauf = ctx.createLinearGradient(0, 0, 0, HEIGHT - GROUND);
+    himmelVerlauf.addColorStop(0, C.himmel);
+    himmelVerlauf.addColorStop(1, C.himmelUnten);
+
     const starteExplosion = (x: number, y: number) => {
-      explosionFrame.current = 0;
+      explosionSchritt.current = 0;
       const farben = ["#fff3b0", "#ffd166", "#f4842d", "#e2502a", "#8d8d8d"];
-      for (let i = 0; i < 34; i++) {
+      for (let i = 0; i < EXPL_ANZAHL; i++) {
         const winkel = Math.random() * Math.PI * 2;
-        const tempo = 1.2 + Math.random() * 4.2;
+        // Startgeschwindigkeit ebenfalls auf den Simulationstakt umgerechnet
+        const tempo = (1.2 + Math.random() * 4.2) / 6;
         funken.current.push({
           x,
           y,
           vx: Math.cos(winkel) * tempo,
           vy: Math.sin(winkel) * tempo,
           r: 2 + Math.random() * 4,
-          leben: 26 + Math.random() * 22,
-          maxLeben: 48,
+          leben: EXPL_LEBEN_MIN + Math.random() * EXPL_LEBEN_SPAN,
+          maxLeben: EXPL_MAX_LEBEN,
           farbe: farben[Math.floor(Math.random() * farben.length)],
         });
       }
@@ -302,7 +330,7 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
       setBest((b) => Math.max(b, scoreRef.current));
     };
 
-    // ---------------- Logik ----------------
+    // ---------------- Logik: genau ein Simulationsschritt ----------------
     const update = () => {
       const p = plane.current;
 
@@ -352,10 +380,7 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
     // ---------------- Grafik ----------------
 
     const zeichneHimmel = () => {
-      const g = ctx.createLinearGradient(0, 0, 0, HEIGHT - GROUND);
-      g.addColorStop(0, C.himmel);
-      g.addColorStop(1, C.himmelUnten);
-      ctx.fillStyle = g;
+      ctx.fillStyle = himmelVerlauf;
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
     };
 
@@ -371,7 +396,6 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
       ctx.globalAlpha = 1;
     };
 
-    // Ferne Skyline als Silhouette, scrollt langsamer (Parallaxe)
     const zeichneHintergrund = () => {
       const o = bgX.current;
       zeichneWolke(((40 - o * 0.5) % (WIDTH + 120)) + 60, 95, 1);
@@ -380,18 +404,17 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
 
       const basis = HEIGHT - GROUND;
       ctx.globalAlpha = 0.4;
-      for (let i = -1; i < 9; i++) {
+      for (let i = -1; i < 11; i++) {
         const x = ((i * 58 - o * 0.8) % (WIDTH + 116)) + 58;
         const h = 60 + ((i + 7) % 4) * 32;
         ctx.fillStyle = C.turmDunkel;
         ctx.fillRect(x, basis - h, 44, h);
         ctx.fillStyle = C.turmHell;
-        ctx.fillRect(x + 18, basis - h - 14, 8, 14); // Dachaufbau
+        ctx.fillRect(x + 18, basis - h - 14, 8, 14);
       }
       ctx.globalAlpha = 1;
     };
 
-    // Ein Hochhaus: Körper mit Lichtkante, Fensterraster und Dachplatte
     const zeichneHochhaus = (
       x: number,
       y: number,
@@ -408,30 +431,26 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
       ctx.fillStyle = C.turmDunkel;
       ctx.fillRect(x + TOWER_W - 12, y, 12, h);
 
-      // Fenster: vier Spalten, Raster von oben bzw. unten ausgehend
       const spalten = 4;
       const sx = 11;
       const abstand = (TOWER_W - 2 * sx - spalten * 9) / (spalten - 1);
       const reihen = Math.floor((h - 34) / 17);
       for (let r = 0; r < reihen; r++) {
-        const fy = dachUnten
-          ? y + h - 34 - r * 17
-          : y + 24 + r * 17;
+        const fy = dachUnten ? y + h - 34 - r * 17 : y + 24 + r * 17;
         for (let c = 0; c < spalten; c++) {
           ctx.fillStyle = fensterHell(seed, c, r) ? C.fensterHell : C.fenster;
           ctx.fillRect(x + sx + c * (9 + abstand), fy, 9, 11);
         }
       }
 
-      // Dachplatte an der zur Lücke zeigenden Seite
       const dy = dachUnten ? y + h - 16 : y;
       ctx.fillStyle = C.dach;
       ctx.fillRect(x - 6, dy, TOWER_W + 12, 16);
       ctx.fillStyle = C.turmHell;
       ctx.fillRect(x - 6, dy + (dachUnten ? 0 : 13), TOWER_W + 12, 3);
 
-      // Rote Positionsleuchte am Dachrand, blinkt langsam
-      if (Math.floor(frame.current / 30) % 2 === 0) {
+      // Blinklicht: zwei Zyklen pro Sekunde, zeitbasiert statt framebasiert
+      if (Math.floor(simZeit.current * 2) % 2 === 0) {
         ctx.fillStyle = "#ff5a4d";
         ctx.beginPath();
         ctx.arc(x + TOWER_W / 2, dachUnten ? dy - 3 : dy + 19, 3, 0, Math.PI * 2);
@@ -443,7 +462,6 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
       ctx.strokeRect(x + 1, y - 1, TOWER_W - 2, h + 2);
     };
 
-    // Boden als Straße mit Mittelstreifen
     const zeichneStrasse = () => {
       const top = HEIGHT - GROUND;
       const o = groundX.current;
@@ -461,10 +479,11 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
       }
     };
 
-    // Flugzeug in Seitenansicht: Rumpf, Leitwerk, Flügel, Cockpit, Propeller
     const zeichneFlugzeug = () => {
       const p = plane.current;
-      const winkel = Math.max(-0.35, Math.min(0.9, p.v / 11));
+      // Neigung aus der Geschwindigkeit. Der Teiler ist auf den
+      // Simulationstakt bezogen: 11 bei 60 Hz entspricht hier 11/6.
+      const winkel = Math.max(-0.35, Math.min(0.9, p.v / (11 / 6)));
 
       ctx.save();
       ctx.translate(PLANE_X, p.y);
@@ -472,7 +491,6 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
       ctx.lineWidth = 2;
       ctx.strokeStyle = C.umriss;
 
-      // Hinteres Leitwerk
       ctx.fillStyle = C.streifen;
       ctx.beginPath();
       ctx.moveTo(-18, 2);
@@ -482,13 +500,11 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
       ctx.fill();
       ctx.stroke();
 
-      // Rumpf
       ctx.fillStyle = C.rumpf;
       pfadRund(ctx, -22, -8, 44, 16, 8);
       ctx.fill();
       ctx.stroke();
 
-      // Spitze
       ctx.fillStyle = C.rumpf;
       ctx.beginPath();
       ctx.moveTo(18, -7);
@@ -497,14 +513,12 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
       ctx.fill();
       ctx.stroke();
 
-      // Zierstreifen und Schatten
       ctx.fillStyle = C.streifen;
       ctx.fillRect(-16, -2, 30, 3);
       ctx.fillStyle = C.rumpfSchatten;
       pfadRund(ctx, -20, 3, 38, 4, 2);
       ctx.fill();
 
-      // Flügel nach vorn unten
       ctx.fillStyle = C.fluegel;
       ctx.beginPath();
       ctx.moveTo(-4, 3);
@@ -514,15 +528,14 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
       ctx.fill();
       ctx.stroke();
 
-      // Cockpitfenster
       ctx.fillStyle = C.cockpit;
       pfadRund(ctx, 9, -6, 8, 6, 2);
       ctx.fill();
 
-      // Propellerkreis, dreht sich mit dem Frame-Zähler
+      // Propeller: 54 Radiant pro Sekunde, zeitbasiert
       ctx.strokeStyle = C.umriss;
       ctx.beginPath();
-      const ph = frame.current * 0.9;
+      const ph = simZeit.current * 54;
       ctx.moveTo(26 + Math.cos(ph) * 2, Math.sin(ph) * 11);
       ctx.lineTo(26 - Math.cos(ph) * 2, -Math.sin(ph) * 11);
       ctx.stroke();
@@ -530,37 +543,33 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
       ctx.restore();
     };
 
-    // Explosion: Blitz, Druckwelle, Funken, Rauchpunkte
     const zeichneExplosion = () => {
-      const f = explosionFrame.current;
+      const f = explosionSchritt.current;
 
-      // Kurzer heller Blitz in den ersten Frames
-      if (f < 5) {
-        ctx.fillStyle = `rgba(255,255,255,${0.5 - f * 0.1})`;
+      if (f < EXPL_BLITZ) {
+        ctx.fillStyle = `rgba(255,255,255,${0.5 * (1 - f / EXPL_BLITZ)})`;
         ctx.fillRect(0, 0, WIDTH, HEIGHT);
       }
 
-      // Expandierender Ring
-      if (f < 24 && funken.current.length > 0) {
+      if (f < EXPL_RING && funken.current.length > 0) {
         const q = funken.current[0];
-        ctx.strokeStyle = `rgba(255,214,102,${1 - f / 24})`;
-        ctx.lineWidth = 6 - f / 6;
+        ctx.strokeStyle = `rgba(255,214,102,${1 - f / EXPL_RING})`;
+        ctx.lineWidth = Math.max(1, 6 - (f / EXPL_RING) * 4);
         ctx.beginPath();
-        ctx.arc(q.x, q.y, 10 + f * 3.4, 0, Math.PI * 2);
+        ctx.arc(q.x, q.y, 10 + (f / EXPL_RING) * 82, 0, Math.PI * 2);
         ctx.stroke();
       }
 
-      // Feuerball im Zentrum
-      if (f < 16 && funken.current.length > 0) {
+      if (f < EXPL_BALL && funken.current.length > 0) {
         const q = funken.current[0];
-        const r = 26 - f * 1.2;
-        const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, Math.max(r, 1));
+        const r = Math.max(1, 26 * (1 - f / EXPL_BALL));
+        const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, r);
         g.addColorStop(0, "rgba(255,255,220,0.95)");
         g.addColorStop(0.5, "rgba(244,132,45,0.8)");
         g.addColorStop(1, "rgba(226,80,42,0)");
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(q.x, q.y, Math.max(r, 1), 0, Math.PI * 2);
+        ctx.arc(q.x, q.y, r, 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -588,43 +597,70 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
         );
       });
       zeichneStrasse();
-      // Solange Funken fliegen, bleibt das Flugzeug ausgeblendet
       if (funken.current.length === 0) zeichneFlugzeug();
       else zeichneExplosion();
     };
 
-    const loop = () => {
-      frame.current += 1;
+    // ---------------- Ein Simulationsschritt ----------------
+    const tick = () => {
+      simZeit.current += 1 / SIM_HZ;
 
       if (statusRef.current === "running") {
         update();
         groundX.current += TOWER_SPEED;
         bgX.current += TOWER_SPEED * 0.4;
       } else if (statusRef.current === "ready") {
-        plane.current.y = HEIGHT / 2 + Math.sin(frame.current * 0.08) * 8;
+        // Schweben: 4,8 Radiant pro Sekunde, 8 Pixel Ausschlag
+        plane.current.y =
+          HEIGHT / 2 + Math.sin(simZeit.current * 4.8) * 8;
         plane.current.v = 0;
         groundX.current += TOWER_SPEED;
         bgX.current += TOWER_SPEED * 0.4;
       }
 
-      // Funken bewegen sich unabhängig vom Spielstatus weiter
       if (funken.current.length > 0) {
-        explosionFrame.current += 1;
+        explosionSchritt.current += 1;
         funken.current.forEach((k) => {
           k.x += k.vx;
           k.y += k.vy;
-          k.vy += 0.14;   // leichte Schwerkraft
-          k.vx *= 0.97;   // Luftwiderstand
-          k.r *= 0.975;
+          k.vy += EXPL_GRAVITY;
+          k.vx *= EXPL_DRAG;
+          k.r *= EXPL_SHRINK;
           k.leben -= 1;
         });
         funken.current = funken.current.filter((k) => k.leben > 0);
       }
+    };
+
+    // ---------------- Hauptschleife ----------------
+    let letzteZeit = performance.now();
+    let akku = 0;
+
+    const loop = (jetzt: number) => {
+      let delta = jetzt - letzteZeit;
+      letzteZeit = jetzt;
+
+      // Nach einem Tab-Wechsel oder Haltepunkt im Debugger wäre delta sehr
+      // groß. Dann wird ein einzelner Schritt gerechnet statt tausender.
+      if (delta > 250) delta = STEP;
+
+      akku += delta;
+
+      // So viele Schritte wie nötig, höchstens MAX_STEPS. Bei 360 Hz ist
+      // das ein Schritt pro Bild, bei 60 Hz sechs, bei 30 Hz zwölf.
+      let schritte = 0;
+      while (akku >= STEP && schritte < MAX_STEPS) {
+        tick();
+        akku -= STEP;
+        schritte += 1;
+      }
+      // Reste verwerfen, falls das Gerät nicht mitkommt
+      if (schritte === MAX_STEPS) akku = 0;
 
       draw();
       raf = requestAnimationFrame(loop);
     };
-    loop();
+    raf = requestAnimationFrame(loop);
 
     return () => cancelAnimationFrame(raf);
   }, [setGameStatus]);
@@ -633,7 +669,7 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex w-full max-w-3xl flex-col items-center gap-6 px-6 py-16">
         <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-zinc-50">
-          9-11-Simulator
+          Skyline Dash
         </h1>
 
         <div
