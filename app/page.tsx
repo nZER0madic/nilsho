@@ -1,38 +1,54 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+const GEHEIMWORT = "secret flappy";
 
 export default function Home() {
-  // Aktueller Inhalt des Eingabefelds
   const [eingabe, setEingabe] = useState("");
-  // Alle bisherigen Eingaben als Liste (Array von Texten)
   const [verlauf, setVerlauf] = useState<string[]>([]);
+  const [spielAktiv, setSpielAktiv] = useState(false);
+  const [hinweis, setHinweis] = useState("");
 
-  // Eingabe an den Verlauf anhängen
   function handleSenden() {
     const wert = eingabe.trim();
     if (wert === "") return;
-    // Neues Array aus bisherigem Verlauf (...verlauf) plus neuem Wert.
-    // State wird nie direkt verändert, sondern immer neu gesetzt.
+
+    if (wert.toLowerCase() === GEHEIMWORT) {
+      setEingabe("");
+      setHinweis("Geheimwort erkannt.");
+      setSpielAktiv(true);
+      return;
+    }
+
     setVerlauf([...verlauf, wert]);
-    // Feld nach dem Senden leeren
     setEingabe("");
+    setHinweis("");
   }
 
-  // Löscht den gesamten Verlauf
   function handleVerlaufLoeschen() {
     setVerlauf([]);
+    setHinweis("");
   }
 
-  // Leert nur das Eingabefeld
   function handleFeldLeeren() {
     setEingabe("");
   }
 
-  // Gemeinsame Klassen aller drei Buttons – vermeidet Wiederholung
   const buttonKlassen =
     "flex h-12 w-full items-center justify-center rounded-full border border-solid border-[#4169E1] px-5 transition-colors md:w-[158px]";
+
+  if (spielAktiv) {
+    return (
+      <Flattervogel
+        onBeenden={() => {
+          setSpielAktiv(false);
+          setHinweis("");
+        }}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
@@ -51,11 +67,8 @@ export default function Home() {
             Gib etwas ein und drücke einen Button.
           </h1>
 
-          {/* Chatverlauf: wird nur angezeigt, wenn mindestens ein Eintrag existiert */}
           {verlauf.length > 0 && (
             <div className="flex w-full max-w-md flex-col gap-2">
-              {/* .map() erzeugt für jeden Eintrag ein eigenes Element.
-                  key hilft React, die Einträge auseinanderzuhalten. */}
               {verlauf.map((nachricht, index) => (
                 <div
                   key={index}
@@ -83,15 +96,12 @@ export default function Home() {
             />
 
             <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-              {/* Button 1: sendet die Eingabe in den Verlauf */}
               <button
                 type="submit"
                 className={`${buttonKlassen} bg-[#4169E1] text-white hover:bg-[#27408B]`}
               >
                 Senden
               </button>
-
-              {/* Button 2: löscht den gesamten Verlauf */}
               <button
                 type="button"
                 onClick={handleVerlaufLoeschen}
@@ -99,8 +109,6 @@ export default function Home() {
               >
                 Verlauf löschen
               </button>
-
-              {/* Button 3: leert nur das Eingabefeld */}
               <button
                 type="button"
                 onClick={handleFeldLeeren}
@@ -112,12 +120,499 @@ export default function Home() {
           </form>
         </div>
 
-        {/* Statuszeile statt einzelner Textausgabe */}
         <p className="min-h-8 max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-          {verlauf.length === 0
-            ? "Noch keine Eingaben."
-            : `${verlauf.length} Eingabe${verlauf.length === 1 ? "" : "n"} im Verlauf.`}
+          {hinweis ||
+            (verlauf.length === 0
+              ? "Noch keine Eingaben."
+              : `${verlauf.length} Eingabe${verlauf.length === 1 ? "" : "n"} im Verlauf.`)}
         </p>
+      </main>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Spiel
+// ---------------------------------------------------------------------------
+
+const WIDTH = 500;
+const HEIGHT = 700;
+const GROUND = 96;        // Bodenstreifen inkl. Grasnarbe
+
+// ---- Flugverhalten: flachere Parabel ----
+// Weniger Schwerkraft und ein sanfterer Impuls verlängern die Zeit zwischen
+// Steigen und Fallen. Da die Röhren gleich schnell scrollen, wird der Bogen
+// dadurch horizontal breiter und ruhiger.
+const GRAVITY = 0.02;     // vorher 0.45
+const JUMP = -2.5;        // vorher -7.5
+const MAX_FALL = 7.5;     // begrenzt die Fallgeschwindigkeit
+
+const BIRD_X = 90;
+const BIRD_R = 15;
+const PIPE_W = 62;
+const CAP_W = PIPE_W + 10; // Kappe ragt links und rechts heraus
+const CAP_H = 26;
+const PIPE_GAP = 200;      // etwas größer, passend zum weicheren Flug
+const PIPE_SPEED = 1.0;
+const PIPE_DIST = 400;     // mehr Abstand, damit der breite Bogen hineinpasst
+
+// ---- Farbpalette im Stil des Originals ----
+const C = {
+  himmel: "#4ec0ca",
+  himmelUnten: "#8ad4dc",
+  wolke: "#ffffff",
+  busch: "#5ee270",
+  buschDunkel: "#3fa85a",
+  haus: "#dedede",
+  roehre: "#74bf2e",
+  roehreHell: "#b7e76a",
+  roehreDunkel: "#508a1e",
+  umriss: "#3b2d1a",
+  gras: "#5ee270",
+  grasDunkel: "#3fa85a",
+  boden: "#ded895",
+  bodenDunkel: "#c9c072",
+  vogel: "#f7d51d",
+  vogelDunkel: "#e0a81c",
+  bauch: "#fdfcd3",
+  schnabel: "#f8913a",
+  schnabelDunkel: "#dd6f1f",
+};
+
+type Status = "ready" | "running" | "over";
+type Pipe = { x: number; gapY: number; passed: boolean };
+
+// Kleiner Helfer: abgerundetes Rechteck als Pfad (für ältere Browser ohne roundRect)
+function pfadRund(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  const rad = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rad, y);
+  ctx.lineTo(x + w - rad, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + rad);
+  ctx.lineTo(x + w, y + h - rad);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - rad, y + h);
+  ctx.lineTo(x + rad, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - rad);
+  ctx.lineTo(x, y + rad);
+  ctx.quadraticCurveTo(x, y, x + rad, y);
+  ctx.closePath();
+}
+
+function Flattervogel({ onBeenden }: { onBeenden: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const [status, setStatus] = useState<Status>("ready");
+  const statusRef = useRef<Status>("ready");
+  const setGameStatus = useCallback((s: Status) => {
+    statusRef.current = s;
+    setStatus(s);
+  }, []);
+
+  const [score, setScore] = useState(0);
+  const scoreRef = useRef(0);
+  const [best, setBest] = useState(0);
+
+  const bird = useRef({ y: HEIGHT / 2, v: 0 });
+  const pipes = useRef<Pipe[]>([]);
+  // Zähler für Flügelschlag und die scrollenden Hintergrundebenen
+  const frame = useRef(0);
+  const groundX = useRef(0);
+  const bgX = useRef(0);
+
+  const reset = useCallback(() => {
+    bird.current = { y: HEIGHT / 2, v: 0 };
+    pipes.current = [];
+    scoreRef.current = 0;
+    setScore(0);
+  }, []);
+
+  const flap = useCallback(() => {
+    if (statusRef.current === "ready") {
+      reset();
+      setGameStatus("running");
+      bird.current.v = JUMP;
+    } else if (statusRef.current === "running") {
+      bird.current.v = JUMP;
+    } else {
+      reset();
+      setGameStatus("ready");
+    }
+  }, [reset, setGameStatus]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "Space" || e.code === "ArrowUp") {
+        e.preventDefault();
+        flap();
+      }
+      if (e.code === "Escape") onBeenden();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [flap, onBeenden]);
+
+  useEffect(() => {
+    const ctx = canvasRef.current?.getContext("2d");
+    if (!ctx) return;
+    let raf = 0;
+
+    const gameOver = () => {
+      setGameStatus("over");
+      setBest((b) => Math.max(b, scoreRef.current));
+    };
+
+    // ---------------- Logik ----------------
+    const update = () => {
+      const b = bird.current;
+
+      b.v = Math.min(b.v + GRAVITY, MAX_FALL);
+      b.y += b.v;
+
+      pipes.current.forEach((p) => (p.x -= PIPE_SPEED));
+      pipes.current = pipes.current.filter((p) => p.x > -CAP_W);
+
+      const last = pipes.current[pipes.current.length - 1];
+      if (!last || WIDTH - last.x >= PIPE_DIST) {
+        const min = 70;
+        const max = HEIGHT - GROUND - PIPE_GAP - 70;
+        pipes.current.push({
+          x: WIDTH,
+          gapY: min + Math.random() * (max - min),
+          passed: false,
+        });
+      }
+
+      pipes.current.forEach((p) => {
+        if (!p.passed && p.x + PIPE_W < BIRD_X - BIRD_R) {
+          p.passed = true;
+          scoreRef.current += 1;
+          setScore(scoreRef.current);
+        }
+      });
+
+      if (b.y + BIRD_R >= HEIGHT - GROUND || b.y - BIRD_R <= 0) {
+        gameOver();
+        return;
+      }
+
+      for (const p of pipes.current) {
+        // Die Kappe ist breiter als der Körper – sie bestimmt die Trefferzone
+        const imBereich =
+          BIRD_X + BIRD_R - 3 > p.x - 5 && BIRD_X - BIRD_R + 3 < p.x + PIPE_W + 5;
+        const danebenGetroffen =
+          b.y - BIRD_R + 3 < p.gapY || b.y + BIRD_R - 3 > p.gapY + PIPE_GAP;
+        if (imBereich && danebenGetroffen) {
+          gameOver();
+          return;
+        }
+      }
+    };
+
+    // ---------------- Grafik ----------------
+
+    // Himmel mit leichtem Verlauf nach unten
+    const zeichneHimmel = () => {
+      const g = ctx.createLinearGradient(0, 0, 0, HEIGHT - GROUND);
+      g.addColorStop(0, C.himmel);
+      g.addColorStop(1, C.himmelUnten);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    };
+
+    // Eine Wolke aus drei überlappenden Kreisen
+    const zeichneWolke = (x: number, y: number, s: number) => {
+      ctx.fillStyle = C.wolke;
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.arc(x, y, 14 * s, 0, Math.PI * 2);
+      ctx.arc(x + 16 * s, y - 6 * s, 18 * s, 0, Math.PI * 2);
+      ctx.arc(x + 34 * s, y, 13 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(x - 14 * s, y, 48 * s, 14 * s);
+      ctx.globalAlpha = 1;
+    };
+
+    // Hintergrundebene: Wolken, Häuserzeile, Büschereihe – scrollt langsamer
+    const zeichneHintergrund = () => {
+      const o = bgX.current;
+      zeichneWolke(((40 - o * 0.5) % (WIDTH + 120)) + 60, 90, 1);
+      zeichneWolke(((230 - o * 0.5) % (WIDTH + 120)) + 60, 150, 0.75);
+      zeichneWolke(((420 - o * 0.5) % (WIDTH + 120)) + 60, 60, 0.9);
+
+      // Angedeutete Skyline
+      const basis = HEIGHT - GROUND - 36;
+      ctx.fillStyle = C.haus;
+      ctx.globalAlpha = 0.55;
+      for (let i = -1; i < 7; i++) {
+        const x = ((i * 70 - o * 0.75) % (WIDTH + 140)) + 70;
+        const h = 26 + ((i + 5) % 3) * 12;
+        ctx.fillRect(x, basis - h, 46, h);
+      }
+      ctx.globalAlpha = 1;
+
+      // Büschereihe direkt über dem Boden
+      const by = HEIGHT - GROUND - 18;
+      for (let i = -1; i < 10; i++) {
+        const x = ((i * 48 - o) % (WIDTH + 96)) + 48;
+        ctx.fillStyle = C.buschDunkel;
+        ctx.beginPath();
+        ctx.arc(x, by + 6, 20, Math.PI, 0);
+        ctx.fill();
+        ctx.fillStyle = C.busch;
+        ctx.beginPath();
+        ctx.arc(x, by + 10, 16, Math.PI, 0);
+        ctx.fill();
+      }
+      ctx.fillStyle = C.busch;
+      ctx.fillRect(0, by + 10, WIDTH, 14);
+    };
+
+    // Ein Röhrensegment: Körper mit Glanzlicht plus Kappe am Ende
+    const zeichneRoehre = (
+      x: number,
+      y: number,
+      h: number,
+      kappeOben: boolean
+    ) => {
+      if (h <= 0) return;
+
+      // Körper
+      ctx.fillStyle = C.roehre;
+      ctx.fillRect(x, y, PIPE_W, h);
+      ctx.fillStyle = C.roehreHell;
+      ctx.fillRect(x + 7, y, 11, h);
+      ctx.fillStyle = C.roehreDunkel;
+      ctx.fillRect(x + PIPE_W - 14, y, 10, h);
+      ctx.strokeStyle = C.umriss;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 1, y - 1, PIPE_W - 2, h + 2);
+
+      // Kappe
+      const cx = x - 5;
+      const cy = kappeOben ? y + h - CAP_H : y;
+      ctx.fillStyle = C.roehre;
+      ctx.fillRect(cx, cy, CAP_W, CAP_H);
+      ctx.fillStyle = C.roehreHell;
+      ctx.fillRect(cx + 7, cy + 2, 11, CAP_H - 4);
+      ctx.fillStyle = C.roehreDunkel;
+      ctx.fillRect(cx + CAP_W - 15, cy + 2, 11, CAP_H - 4);
+      ctx.strokeStyle = C.umriss;
+      ctx.strokeRect(cx + 1, cy + 1, CAP_W - 2, CAP_H - 2);
+    };
+
+    // Boden: Grasnarbe mit Zickzackkante und gestreifte Erde, beides scrollend
+    const zeichneBoden = () => {
+      const top = HEIGHT - GROUND;
+      const o = groundX.current;
+
+      ctx.fillStyle = C.gras;
+      ctx.fillRect(0, top, WIDTH, 22);
+      ctx.fillStyle = C.grasDunkel;
+      for (let i = -1; i < WIDTH / 12 + 2; i++) {
+        const x = i * 12 - (o % 12);
+        ctx.beginPath();
+        ctx.moveTo(x, top + 22);
+        ctx.lineTo(x + 6, top + 14);
+        ctx.lineTo(x + 12, top + 22);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      ctx.fillStyle = C.boden;
+      ctx.fillRect(0, top + 22, WIDTH, GROUND - 22);
+      ctx.fillStyle = C.bodenDunkel;
+      for (let i = -2; i < WIDTH / 24 + 3; i++) {
+        const x = i * 24 - (o % 24);
+        ctx.beginPath();
+        ctx.moveTo(x, top + 22);
+        ctx.lineTo(x + 12, top + 22);
+        ctx.lineTo(x + 2, HEIGHT);
+        ctx.lineTo(x - 10, HEIGHT);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      ctx.fillStyle = C.umriss;
+      ctx.fillRect(0, top, WIDTH, 2);
+    };
+
+    // Vogel: Körper, Bauch, Flügel (dreistufiger Schlag), Auge, Schnabel
+    const zeichneVogel = () => {
+      const b = bird.current;
+      // Neigung: beim Steigen leicht nach oben, beim Fallen zunehmend nach unten
+      const winkel = Math.max(-0.4, Math.min(1.25, b.v / 9));
+      // Drei Flügelstellungen, im Fall hängt der Flügel still
+      const phase = Math.floor(frame.current / 6) % 4;
+      const fluegel = b.v > 2 ? 2 : [0, -4, 0, 4][phase];
+
+      ctx.save();
+      ctx.translate(BIRD_X, b.y);
+      ctx.rotate(winkel);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = C.umriss;
+
+      // Körper
+      ctx.fillStyle = C.vogel;
+      pfadRund(ctx, -BIRD_R, -BIRD_R + 2, BIRD_R * 2, BIRD_R * 2 - 5, 9);
+      ctx.fill();
+      ctx.stroke();
+
+      // Schattierung unten
+      ctx.fillStyle = C.vogelDunkel;
+      pfadRund(ctx, -BIRD_R + 2, BIRD_R - 8, BIRD_R * 2 - 4, 7, 4);
+      ctx.fill();
+
+      // Heller Bauch
+      ctx.fillStyle = C.bauch;
+      pfadRund(ctx, -2, 1, 15, 9, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      // Flügel
+      ctx.fillStyle = "#ffffff";
+      pfadRund(ctx, -13, -3 + fluegel, 14, 10, 5);
+      ctx.fill();
+      ctx.stroke();
+
+      // Auge
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(7, -6, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = C.umriss;
+      ctx.fillRect(7, -9, 4, 7);
+
+      // Schnabel
+      ctx.fillStyle = C.schnabel;
+      pfadRund(ctx, 9, 0, 14, 8, 3);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = C.schnabelDunkel;
+      ctx.fillRect(11, 5, 10, 2);
+
+      ctx.restore();
+    };
+
+    const draw = () => {
+      zeichneHimmel();
+      zeichneHintergrund();
+      pipes.current.forEach((p) => {
+        zeichneRoehre(p.x, 0, p.gapY, true);
+        zeichneRoehre(
+          p.x,
+          p.gapY + PIPE_GAP,
+          HEIGHT - GROUND - p.gapY - PIPE_GAP,
+          false
+        );
+      });
+      zeichneBoden();
+      zeichneVogel();
+    };
+
+    const loop = () => {
+      frame.current += 1;
+      if (statusRef.current === "running") {
+        update();
+        groundX.current += PIPE_SPEED;
+        bgX.current += PIPE_SPEED * 0.4;
+      } else if (statusRef.current === "ready") {
+        // Im Startzustand schwebt der Vogel sanft auf und ab
+        bird.current.y = HEIGHT / 2 + Math.sin(frame.current * 0.08) * 8;
+        bird.current.v = 0;
+        groundX.current += PIPE_SPEED;
+        bgX.current += PIPE_SPEED * 0.4;
+      }
+      draw();
+      raf = requestAnimationFrame(loop);
+    };
+    loop();
+
+    return () => cancelAnimationFrame(raf);
+  }, [setGameStatus]);
+
+  return (
+    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
+      <main className="flex w-full max-w-3xl flex-col items-center gap-6 px-6 py-16">
+        <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-zinc-50">
+          Flattervogel
+        </h1>
+
+        <div
+          onPointerDown={flap}
+          className="relative cursor-pointer select-none overflow-hidden rounded-2xl border border-solid border-[#4169E1] touch-none"
+          style={{ width: WIDTH, height: HEIGHT }}
+        >
+          <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} />
+
+          <div
+            className="pointer-events-none absolute left-0 top-6 w-full text-center text-5xl font-extrabold text-white"
+            style={{ WebkitTextStroke: "3px #3b2d1a" }}
+          >
+            {score}
+          </div>
+
+          {status === "ready" && (
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-end gap-2 pb-40 text-center text-white">
+              <p
+                className="text-3xl font-extrabold"
+                style={{ WebkitTextStroke: "2px #3b2d1a" }}
+              >
+                Bereit?
+              </p>
+              <p className="rounded-full bg-black/40 px-4 py-1 text-sm">
+                Klicken oder Leertaste zum Flattern
+              </p>
+            </div>
+          )}
+
+          {status === "over" && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div className="rounded-2xl border-2 border-[#3b2d1a] bg-[#ded895] px-8 py-6 text-center text-[#3b2d1a] shadow-lg">
+                <p className="text-2xl font-extrabold">Vorbei</p>
+                <p className="mt-2 text-lg">Punkte: {score}</p>
+                <p className="text-lg">Bestleistung: {best}</p>
+                <p className="mt-3 text-sm">Klicken für einen neuen Versuch</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
+          <button
+            type="button"
+            onClick={flap}
+            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-[#4169E1] bg-[#4169E1] px-5 text-white transition-colors hover:bg-[#27408B] md:w-[158px]"
+          >
+            {status === "running" ? "Flattern" : "Start"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              reset();
+              setGameStatus("ready");
+            }}
+            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-[#4169E1] px-5 text-[#4169E1] transition-colors hover:bg-[#4169E1]/10 md:w-[158px]"
+          >
+            Neues Spiel
+          </button>
+          <button
+            type="button"
+            onClick={onBeenden}
+            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-[#4169E1] px-5 text-[#4169E1] transition-colors hover:bg-[#4169E1]/10 md:w-[158px]"
+          >
+            Zurück
+          </button>
+        </div>
+
+        <p className="text-zinc-600 dark:text-zinc-400">Bestleistung: {best}</p>
       </main>
     </div>
   );
