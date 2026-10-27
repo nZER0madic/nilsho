@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const GEHEIMWORT = "secret flappy";
+const GEHEIMWORT = "allahu akbar";
 
 export default function Home() {
   const [eingabe, setEingabe] = useState("");
