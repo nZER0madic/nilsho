@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const GEHEIMWORT = "allahu akbar";
+const GEHEIMWORT = "secret flappy";
 
 export default function Home() {
   const [eingabe, setEingabe] = useState("");
@@ -41,7 +41,7 @@ export default function Home() {
 
   if (spielAktiv) {
     return (
-      <SkylineDash
+      <Flattervogel
         onBeenden={() => {
           setSpielAktiv(false);
           setHinweis("");
@@ -136,75 +136,65 @@ export default function Home() {
 // ---------------------------------------------------------------------------
 
 // ---- Simulationstakt ----
-// Deine Werte wurden bei 360 Bildern pro Sekunde eingestellt. Damit sie
-// unverändert gültig bleiben, rechnet die Simulation intern weiterhin
-// 360 Schritte pro Sekunde – unabhängig davon, wie oft gezeichnet wird.
+// Alle Physikwerte unten sind "pro Schritt" definiert und wurden bei 360
+// Bildern pro Sekunde eingestellt. Die Simulation läuft daher fest mit 360
+// Schritten pro Sekunde, unabhängig von der Bildrate des Geräts. Bei 360 Hz
+// ist das ein Schritt pro Bild, bei 60 Hz sechs, bei 30 Hz zwölf.
 const SIM_HZ = 360;
 const STEP = 1000 / SIM_HZ;   // Dauer eines Schritts in Millisekunden
-const MAX_STEPS = 32;         // Obergrenze pro Frame (reicht bis ca. 11 fps)
+const MAX_STEPS = 32;         // Obergrenze pro Bild, schützt schwache Geräte
 
-const WIDTH = 400;
-const HEIGHT = 600;
-const GROUND = 96;
+const WIDTH = 500;
+const HEIGHT = 700;
+const GROUND = 96;        // Bodenstreifen inkl. Grasnarbe
 
-// ---- Deine Physik, unverändert (Einheiten: pro Simulationsschritt) ----
-const GRAVITY = 0.018; //default 0.02
-const JUMP = -2.4; //default -2.5
-const MAX_FALL = 7.0; //default 7.5
+// ---- Flugverhalten: unverändert übernommen ----
+const GRAVITY = 0.018;
+const JUMP = -2.3;
+const MAX_FALL = 7.5;
 
-const PLANE_X = 90; //default 90
-const PLANE_R = 15; //default 15 - Trefferradius (das Flugzeug ist breiter als hoch)
-const TOWER_W = 70; //default 70
-const TOWER_GAP = 200; //default 200
-const TOWER_SPEED = 0.95; //default 1.0
-const TOWER_DIST = 400; //default 400
+const BIRD_X = 90;
+const BIRD_R = 15;
+const PIPE_W = 62;
+const CAP_W = PIPE_W + 10; // Kappe ragt links und rechts heraus
+const CAP_H = 26;
+const PIPE_GAP = 200;
+const PIPE_SPEED = 1.0;
+const PIPE_DIST = 400;
 
-// ---- Explosion, ebenfalls auf den Simulationstakt bezogen ----
-const EXPL_ANZAHL = 34;
-const EXPL_GRAVITY = 0.14 / 36;      // Schwerkraft der Funken pro Schritt
-const EXPL_DRAG = Math.pow(0.97, 1 / 6);   // Luftwiderstand pro Schritt
-const EXPL_SHRINK = Math.pow(0.975, 1 / 6); // Schrumpfen pro Schritt
-const EXPL_LEBEN_MIN = 26 * 6;       // Lebensdauer in Schritten
-const EXPL_LEBEN_SPAN = 22 * 6;
-const EXPL_MAX_LEBEN = 48 * 6;
-const EXPL_BLITZ = 5 * 6;            // Dauer des weißen Blitzes
-const EXPL_RING = 24 * 6;            // Dauer der Druckwelle
-const EXPL_BALL = 16 * 6;            // Dauer des Feuerballs
+// ---- Animationstempi, aus den alten Frame-Zählern umgerechnet ----
+// Alt: Math.floor(frame / 6) % 4  bei 360 fps  ->  60 Phasen pro Sekunde
+const FLUEGEL_HZ = 60;
+// Alt: Math.sin(frame * 0.08)     bei 360 fps  ->  28,8 Radiant pro Sekunde
+const SCHWEBE_TEMPO = 0.08 * SIM_HZ;
 
+// ---- Farbpalette im Stil des Originals ----
 const C = {
-  himmel: "#5bb7d6",
-  himmelUnten: "#a8dcea",
+  himmel: "#4ec0ca",
+  himmelUnten: "#8ad4dc",
   wolke: "#ffffff",
-  turm: "#7b8a9e",
-  turmHell: "#9aa9bd",
-  turmDunkel: "#566273",
-  dach: "#4a5666",
-  fenster: "#2e3a4a",
-  fensterHell: "#ffd86b",
-  umriss: "#2b3340",
-  strasse: "#4a4f57",
-  strasseHell: "#5c626b",
-  markierung: "#e8e2b8",
-  rumpf: "#f2f4f8",
-  rumpfSchatten: "#c9d0db",
-  streifen: "#d6453d",
-  fluegel: "#dfe4ec",
-  cockpit: "#2e3a4a",
+  busch: "#5ee270",
+  buschDunkel: "#3fa85a",
+  haus: "#dedede",
+  roehre: "#74bf2e",
+  roehreHell: "#b7e76a",
+  roehreDunkel: "#508a1e",
+  umriss: "#3b2d1a",
+  gras: "#5ee270",
+  grasDunkel: "#3fa85a",
+  boden: "#ded895",
+  bodenDunkel: "#c9c072",
+  vogel: "#f7d51d",
+  vogelDunkel: "#e0a81c",
+  bauch: "#fdfcd3",
+  schnabel: "#f8913a",
+  schnabelDunkel: "#dd6f1f",
 };
 
 type Status = "ready" | "running" | "over";
-type Tower = { x: number; gapY: number; passed: boolean; seed: number };
-type Funke = {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  r: number;
-  leben: number;
-  maxLeben: number;
-  farbe: string;
-};
+type Pipe = { x: number; gapY: number; passed: boolean };
 
+// Kleiner Helfer: abgerundetes Rechteck als Pfad (für ältere Browser ohne roundRect)
 function pfadRund(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -227,14 +217,7 @@ function pfadRund(
   ctx.closePath();
 }
 
-// Pseudozufall mit festem Startwert: beleuchtete Fenster bleiben pro Turm gleich
-function fensterHell(seed: number, spalte: number, reihe: number) {
-  const n =
-    Math.sin(seed * 12.9898 + spalte * 78.233 + reihe * 37.719) * 43758.5453;
-  return n - Math.floor(n) > 0.55;
-}
-
-function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
+function Flattervogel({ onBeenden }: { onBeenden: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [status, setStatus] = useState<Status>("ready");
@@ -248,23 +231,19 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
   const scoreRef = useRef(0);
   const [best, setBest] = useState(0);
 
-  const plane = useRef({ y: HEIGHT / 2, v: 0 });
-  const towers = useRef<Tower[]>([]);
+  const bird = useRef({ y: HEIGHT / 2, v: 0 });
+  const pipes = useRef<Pipe[]>([]);
   const groundX = useRef(0);
   const bgX = useRef(0);
 
-  // Simulationszeit in Sekunden – Grundlage aller Animationen,
-  // damit Propeller, Blinklicht und Schweben überall gleich schnell laufen.
+  // Simulationszeit in Sekunden – Grundlage aller Animationen.
+  // Ersetzt den alten Frame-Zähler, damit Flügelschlag und Schweben
+  // auf jedem Gerät gleich schnell laufen.
   const simZeit = useRef(0);
 
-  const funken = useRef<Funke[]>([]);
-  const explosionSchritt = useRef(0);
-
   const reset = useCallback(() => {
-    plane.current = { y: HEIGHT / 2, v: 0 };
-    towers.current = [];
-    funken.current = [];
-    explosionSchritt.current = 0;
+    bird.current = { y: HEIGHT / 2, v: 0 };
+    pipes.current = [];
     scoreRef.current = 0;
     setScore(0);
   }, []);
@@ -273,9 +252,9 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
     if (statusRef.current === "ready") {
       reset();
       setGameStatus("running");
-      plane.current.v = JUMP;
+      bird.current.v = JUMP;
     } else if (statusRef.current === "running") {
-      plane.current.v = JUMP;
+      bird.current.v = JUMP;
     } else {
       reset();
       setGameStatus("ready");
@@ -295,83 +274,71 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
   }, [flap, onBeenden]);
 
   useEffect(() => {
-    const ctx = canvasRef.current?.getContext("2d");
-    if (!ctx) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
     let raf = 0;
 
-    // Himmelsverlauf nur einmal anlegen, nicht in jedem Bild neu
+    // Scharfe Darstellung auf hochauflösenden Bildschirmen:
+    // Die Pixelfläche wird mit dem Gerätefaktor multipliziert, gezeichnet
+    // wird aber weiter im 500x700-Koordinatensystem.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(WIDTH * dpr);
+    canvas.height = Math.round(HEIGHT * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Himmelsverlauf einmalig anlegen statt in jedem Bild neu
     const himmelVerlauf = ctx.createLinearGradient(0, 0, 0, HEIGHT - GROUND);
     himmelVerlauf.addColorStop(0, C.himmel);
     himmelVerlauf.addColorStop(1, C.himmelUnten);
 
-    const starteExplosion = (x: number, y: number) => {
-      explosionSchritt.current = 0;
-      const farben = ["#fff3b0", "#ffd166", "#f4842d", "#e2502a", "#8d8d8d"];
-      for (let i = 0; i < EXPL_ANZAHL; i++) {
-        const winkel = Math.random() * Math.PI * 2;
-        // Startgeschwindigkeit ebenfalls auf den Simulationstakt umgerechnet
-        const tempo = (1.2 + Math.random() * 4.2) / 6;
-        funken.current.push({
-          x,
-          y,
-          vx: Math.cos(winkel) * tempo,
-          vy: Math.sin(winkel) * tempo,
-          r: 2 + Math.random() * 4,
-          leben: EXPL_LEBEN_MIN + Math.random() * EXPL_LEBEN_SPAN,
-          maxLeben: EXPL_MAX_LEBEN,
-          farbe: farben[Math.floor(Math.random() * farben.length)],
-        });
-      }
-    };
-
-    const gameOver = (x: number, y: number) => {
-      starteExplosion(x, y);
+    const gameOver = () => {
       setGameStatus("over");
       setBest((b) => Math.max(b, scoreRef.current));
     };
 
     // ---------------- Logik: genau ein Simulationsschritt ----------------
     const update = () => {
-      const p = plane.current;
+      const b = bird.current;
 
-      p.v = Math.min(p.v + GRAVITY, MAX_FALL);
-      p.y += p.v;
+      b.v = Math.min(b.v + GRAVITY, MAX_FALL);
+      b.y += b.v;
 
-      towers.current.forEach((t) => (t.x -= TOWER_SPEED));
-      towers.current = towers.current.filter((t) => t.x > -TOWER_W - 20);
+      pipes.current.forEach((p) => (p.x -= PIPE_SPEED));
+      pipes.current = pipes.current.filter((p) => p.x > -CAP_W);
 
-      const last = towers.current[towers.current.length - 1];
-      if (!last || WIDTH - last.x >= TOWER_DIST) {
-        const min = 80;
-        const max = HEIGHT - GROUND - TOWER_GAP - 80;
-        towers.current.push({
+      const last = pipes.current[pipes.current.length - 1];
+      if (!last || WIDTH - last.x >= PIPE_DIST) {
+        const min = 70;
+        const max = HEIGHT - GROUND - PIPE_GAP - 70;
+        pipes.current.push({
           x: WIDTH,
           gapY: min + Math.random() * (max - min),
           passed: false,
-          seed: Math.random() * 100,
         });
       }
 
-      towers.current.forEach((t) => {
-        if (!t.passed && t.x + TOWER_W < PLANE_X - PLANE_R) {
-          t.passed = true;
+      pipes.current.forEach((p) => {
+        if (!p.passed && p.x + PIPE_W < BIRD_X - BIRD_R) {
+          p.passed = true;
           scoreRef.current += 1;
           setScore(scoreRef.current);
         }
       });
 
-      if (p.y + 10 >= HEIGHT - GROUND || p.y - 10 <= 0) {
-        gameOver(PLANE_X, p.y);
+      if (b.y + BIRD_R >= HEIGHT - GROUND || b.y - BIRD_R <= 0) {
+        gameOver();
         return;
       }
 
-      for (const t of towers.current) {
+      for (const p of pipes.current) {
+        // Die Kappe ist breiter als der Körper – sie bestimmt die Trefferzone
         const imBereich =
-          PLANE_X + PLANE_R - 2 > t.x && PLANE_X - PLANE_R + 4 < t.x + TOWER_W;
+          BIRD_X + BIRD_R - 3 > p.x - 5 && BIRD_X - BIRD_R + 3 < p.x + PIPE_W + 5;
         const danebenGetroffen =
-          p.y - 10 < t.gapY || p.y + 10 > t.gapY + TOWER_GAP;
+          b.y - BIRD_R + 3 < p.gapY || b.y + BIRD_R - 3 > p.gapY + PIPE_GAP;
         if (imBereich && danebenGetroffen) {
-          gameOver(Math.max(PLANE_X, t.x), p.y);
+          gameOver();
           return;
         }
       }
@@ -384,9 +351,10 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
     };
 
+    // Eine Wolke aus drei überlappenden Kreisen
     const zeichneWolke = (x: number, y: number, s: number) => {
       ctx.fillStyle = C.wolke;
-      ctx.globalAlpha = 0.85;
+      ctx.globalAlpha = 0.9;
       ctx.beginPath();
       ctx.arc(x, y, 14 * s, 0, Math.PI * 2);
       ctx.arc(x + 16 * s, y - 6 * s, 18 * s, 0, Math.PI * 2);
@@ -396,209 +364,182 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
       ctx.globalAlpha = 1;
     };
 
+    // Hintergrundebene: Wolken, Häuserzeile, Büschereihe – scrollt langsamer
     const zeichneHintergrund = () => {
       const o = bgX.current;
-      zeichneWolke(((40 - o * 0.5) % (WIDTH + 120)) + 60, 95, 1);
-      zeichneWolke(((240 - o * 0.5) % (WIDTH + 120)) + 60, 160, 0.75);
-      zeichneWolke(((430 - o * 0.5) % (WIDTH + 120)) + 60, 55, 0.9);
+      zeichneWolke(((40 - o * 0.5) % (WIDTH + 120)) + 60, 90, 1);
+      zeichneWolke(((230 - o * 0.5) % (WIDTH + 120)) + 60, 150, 0.75);
+      zeichneWolke(((420 - o * 0.5) % (WIDTH + 120)) + 60, 60, 0.9);
 
-      const basis = HEIGHT - GROUND;
-      ctx.globalAlpha = 0.4;
-      for (let i = -1; i < 11; i++) {
-        const x = ((i * 58 - o * 0.8) % (WIDTH + 116)) + 58;
-        const h = 60 + ((i + 7) % 4) * 32;
-        ctx.fillStyle = C.turmDunkel;
-        ctx.fillRect(x, basis - h, 44, h);
-        ctx.fillStyle = C.turmHell;
-        ctx.fillRect(x + 18, basis - h - 14, 8, 14);
+      // Angedeutete Skyline
+      const basis = HEIGHT - GROUND - 36;
+      ctx.fillStyle = C.haus;
+      ctx.globalAlpha = 0.55;
+      for (let i = -1; i < 9; i++) {
+        const x = ((i * 70 - o * 0.75) % (WIDTH + 140)) + 70;
+        const h = 26 + ((i + 5) % 3) * 12;
+        ctx.fillRect(x, basis - h, 46, h);
       }
       ctx.globalAlpha = 1;
+
+      // Büschereihe direkt über dem Boden
+      const by = HEIGHT - GROUND - 18;
+      for (let i = -1; i < 12; i++) {
+        const x = ((i * 48 - o) % (WIDTH + 96)) + 48;
+        ctx.fillStyle = C.buschDunkel;
+        ctx.beginPath();
+        ctx.arc(x, by + 6, 20, Math.PI, 0);
+        ctx.fill();
+        ctx.fillStyle = C.busch;
+        ctx.beginPath();
+        ctx.arc(x, by + 10, 16, Math.PI, 0);
+        ctx.fill();
+      }
+      ctx.fillStyle = C.busch;
+      ctx.fillRect(0, by + 10, WIDTH, 14);
     };
 
-    const zeichneHochhaus = (
+    // Ein Röhrensegment: Körper mit Glanzlicht plus Kappe am Ende
+    const zeichneRoehre = (
       x: number,
       y: number,
       h: number,
-      dachUnten: boolean,
-      seed: number
+      kappeOben: boolean
     ) => {
       if (h <= 0) return;
 
-      ctx.fillStyle = C.turm;
-      ctx.fillRect(x, y, TOWER_W, h);
-      ctx.fillStyle = C.turmHell;
-      ctx.fillRect(x + 4, y, 9, h);
-      ctx.fillStyle = C.turmDunkel;
-      ctx.fillRect(x + TOWER_W - 12, y, 12, h);
-
-      const spalten = 4;
-      const sx = 11;
-      const abstand = (TOWER_W - 2 * sx - spalten * 9) / (spalten - 1);
-      const reihen = Math.floor((h - 34) / 17);
-      for (let r = 0; r < reihen; r++) {
-        const fy = dachUnten ? y + h - 34 - r * 17 : y + 24 + r * 17;
-        for (let c = 0; c < spalten; c++) {
-          ctx.fillStyle = fensterHell(seed, c, r) ? C.fensterHell : C.fenster;
-          ctx.fillRect(x + sx + c * (9 + abstand), fy, 9, 11);
-        }
-      }
-
-      const dy = dachUnten ? y + h - 16 : y;
-      ctx.fillStyle = C.dach;
-      ctx.fillRect(x - 6, dy, TOWER_W + 12, 16);
-      ctx.fillStyle = C.turmHell;
-      ctx.fillRect(x - 6, dy + (dachUnten ? 0 : 13), TOWER_W + 12, 3);
-
-      // Blinklicht: zwei Zyklen pro Sekunde, zeitbasiert statt framebasiert
-      if (Math.floor(simZeit.current * 2) % 2 === 0) {
-        ctx.fillStyle = "#ff5a4d";
-        ctx.beginPath();
-        ctx.arc(x + TOWER_W / 2, dachUnten ? dy - 3 : dy + 19, 3, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
+      // Körper
+      ctx.fillStyle = C.roehre;
+      ctx.fillRect(x, y, PIPE_W, h);
+      ctx.fillStyle = C.roehreHell;
+      ctx.fillRect(x + 7, y, 11, h);
+      ctx.fillStyle = C.roehreDunkel;
+      ctx.fillRect(x + PIPE_W - 14, y, 10, h);
       ctx.strokeStyle = C.umriss;
       ctx.lineWidth = 2;
-      ctx.strokeRect(x + 1, y - 1, TOWER_W - 2, h + 2);
+      ctx.strokeRect(x + 1, y - 1, PIPE_W - 2, h + 2);
+
+      // Kappe
+      const cx = x - 5;
+      const cy = kappeOben ? y + h - CAP_H : y;
+      ctx.fillStyle = C.roehre;
+      ctx.fillRect(cx, cy, CAP_W, CAP_H);
+      ctx.fillStyle = C.roehreHell;
+      ctx.fillRect(cx + 7, cy + 2, 11, CAP_H - 4);
+      ctx.fillStyle = C.roehreDunkel;
+      ctx.fillRect(cx + CAP_W - 15, cy + 2, 11, CAP_H - 4);
+      ctx.strokeStyle = C.umriss;
+      ctx.strokeRect(cx + 1, cy + 1, CAP_W - 2, CAP_H - 2);
     };
 
-    const zeichneStrasse = () => {
+    // Boden: Grasnarbe mit Zickzackkante und gestreifte Erde, beides scrollend
+    const zeichneBoden = () => {
       const top = HEIGHT - GROUND;
       const o = groundX.current;
 
-      ctx.fillStyle = C.strasse;
-      ctx.fillRect(0, top, WIDTH, GROUND);
-      ctx.fillStyle = C.strasseHell;
-      ctx.fillRect(0, top, WIDTH, 10);
+      ctx.fillStyle = C.gras;
+      ctx.fillRect(0, top, WIDTH, 22);
+      ctx.fillStyle = C.grasDunkel;
+      for (let i = -1; i < WIDTH / 12 + 2; i++) {
+        const x = i * 12 - (o % 12);
+        ctx.beginPath();
+        ctx.moveTo(x, top + 22);
+        ctx.lineTo(x + 6, top + 14);
+        ctx.lineTo(x + 12, top + 22);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      ctx.fillStyle = C.boden;
+      ctx.fillRect(0, top + 22, WIDTH, GROUND - 22);
+      ctx.fillStyle = C.bodenDunkel;
+      for (let i = -2; i < WIDTH / 24 + 3; i++) {
+        const x = i * 24 - (o % 24);
+        ctx.beginPath();
+        ctx.moveTo(x, top + 22);
+        ctx.lineTo(x + 12, top + 22);
+        ctx.lineTo(x + 2, HEIGHT);
+        ctx.lineTo(x - 10, HEIGHT);
+        ctx.closePath();
+        ctx.fill();
+      }
+
       ctx.fillStyle = C.umriss;
       ctx.fillRect(0, top, WIDTH, 2);
-
-      ctx.fillStyle = C.markierung;
-      for (let i = -1; i < WIDTH / 44 + 2; i++) {
-        ctx.fillRect(i * 44 - (o % 44), top + 42, 26, 5);
-      }
     };
 
-    const zeichneFlugzeug = () => {
-      const p = plane.current;
-      // Neigung aus der Geschwindigkeit. Der Teiler ist auf den
-      // Simulationstakt bezogen: 11 bei 60 Hz entspricht hier 11/6.
-      const winkel = Math.max(-0.35, Math.min(0.9, p.v / (11 / 6)));
+    // Vogel: Körper, Bauch, Flügel (dreistufiger Schlag), Auge, Schnabel
+    const zeichneVogel = () => {
+      const b = bird.current;
+      // Neigung hängt nur von der Geschwindigkeit ab – Formel unverändert
+      const winkel = Math.max(-0.4, Math.min(1.25, b.v / 9));
+      // Flügelphase jetzt zeitbasiert statt über den Frame-Zähler
+      const phase = Math.floor(simZeit.current * FLUEGEL_HZ) % 4;
+      const fluegel = b.v > 2 ? 2 : [0, -4, 0, 4][phase];
 
       ctx.save();
-      ctx.translate(PLANE_X, p.y);
+      ctx.translate(BIRD_X, b.y);
       ctx.rotate(winkel);
       ctx.lineWidth = 2;
       ctx.strokeStyle = C.umriss;
 
-      ctx.fillStyle = C.streifen;
+      // Körper
+      ctx.fillStyle = C.vogel;
+      pfadRund(ctx, -BIRD_R, -BIRD_R + 2, BIRD_R * 2, BIRD_R * 2 - 5, 9);
+      ctx.fill();
+      ctx.stroke();
+
+      // Schattierung unten
+      ctx.fillStyle = C.vogelDunkel;
+      pfadRund(ctx, -BIRD_R + 2, BIRD_R - 8, BIRD_R * 2 - 4, 7, 4);
+      ctx.fill();
+
+      // Heller Bauch
+      ctx.fillStyle = C.bauch;
+      pfadRund(ctx, -2, 1, 15, 9, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      // Flügel
+      ctx.fillStyle = "#ffffff";
+      pfadRund(ctx, -13, -3 + fluegel, 14, 10, 5);
+      ctx.fill();
+      ctx.stroke();
+
+      // Auge
+      ctx.fillStyle = "#ffffff";
       ctx.beginPath();
-      ctx.moveTo(-18, 2);
-      ctx.lineTo(-24, -14);
-      ctx.lineTo(-12, -2);
-      ctx.closePath();
+      ctx.arc(7, -6, 5.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+      ctx.fillStyle = C.umriss;
+      ctx.fillRect(7, -9, 4, 7);
 
-      ctx.fillStyle = C.rumpf;
-      pfadRund(ctx, -22, -8, 44, 16, 8);
+      // Schnabel
+      ctx.fillStyle = C.schnabel;
+      pfadRund(ctx, 9, 0, 14, 8, 3);
       ctx.fill();
       ctx.stroke();
-
-      ctx.fillStyle = C.rumpf;
-      ctx.beginPath();
-      ctx.moveTo(18, -7);
-      ctx.quadraticCurveTo(30, 0, 18, 7);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = C.streifen;
-      ctx.fillRect(-16, -2, 30, 3);
-      ctx.fillStyle = C.rumpfSchatten;
-      pfadRund(ctx, -20, 3, 38, 4, 2);
-      ctx.fill();
-
-      ctx.fillStyle = C.fluegel;
-      ctx.beginPath();
-      ctx.moveTo(-4, 3);
-      ctx.lineTo(10, 12);
-      ctx.lineTo(-10, 12);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = C.cockpit;
-      pfadRund(ctx, 9, -6, 8, 6, 2);
-      ctx.fill();
-
-      // Propeller: 54 Radiant pro Sekunde, zeitbasiert
-      ctx.strokeStyle = C.umriss;
-      ctx.beginPath();
-      const ph = simZeit.current * 54;
-      ctx.moveTo(26 + Math.cos(ph) * 2, Math.sin(ph) * 11);
-      ctx.lineTo(26 - Math.cos(ph) * 2, -Math.sin(ph) * 11);
-      ctx.stroke();
+      ctx.fillStyle = C.schnabelDunkel;
+      ctx.fillRect(11, 5, 10, 2);
 
       ctx.restore();
-    };
-
-    const zeichneExplosion = () => {
-      const f = explosionSchritt.current;
-
-      if (f < EXPL_BLITZ) {
-        ctx.fillStyle = `rgba(255,255,255,${0.5 * (1 - f / EXPL_BLITZ)})`;
-        ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      }
-
-      if (f < EXPL_RING && funken.current.length > 0) {
-        const q = funken.current[0];
-        ctx.strokeStyle = `rgba(255,214,102,${1 - f / EXPL_RING})`;
-        ctx.lineWidth = Math.max(1, 6 - (f / EXPL_RING) * 4);
-        ctx.beginPath();
-        ctx.arc(q.x, q.y, 10 + (f / EXPL_RING) * 82, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-
-      if (f < EXPL_BALL && funken.current.length > 0) {
-        const q = funken.current[0];
-        const r = Math.max(1, 26 * (1 - f / EXPL_BALL));
-        const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, r);
-        g.addColorStop(0, "rgba(255,255,220,0.95)");
-        g.addColorStop(0.5, "rgba(244,132,45,0.8)");
-        g.addColorStop(1, "rgba(226,80,42,0)");
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(q.x, q.y, r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      funken.current.forEach((k) => {
-        ctx.globalAlpha = Math.max(0, k.leben / k.maxLeben);
-        ctx.fillStyle = k.farbe;
-        ctx.beginPath();
-        ctx.arc(k.x, k.y, k.r, 0, Math.PI * 2);
-        ctx.fill();
-      });
-      ctx.globalAlpha = 1;
     };
 
     const draw = () => {
       zeichneHimmel();
       zeichneHintergrund();
-      towers.current.forEach((t) => {
-        zeichneHochhaus(t.x, 0, t.gapY, true, t.seed);
-        zeichneHochhaus(
-          t.x,
-          t.gapY + TOWER_GAP,
-          HEIGHT - GROUND - t.gapY - TOWER_GAP,
-          false,
-          t.seed + 9
+      pipes.current.forEach((p) => {
+        zeichneRoehre(p.x, 0, p.gapY, true);
+        zeichneRoehre(
+          p.x,
+          p.gapY + PIPE_GAP,
+          HEIGHT - GROUND - p.gapY - PIPE_GAP,
+          false
         );
       });
-      zeichneStrasse();
-      if (funken.current.length === 0) zeichneFlugzeug();
-      else zeichneExplosion();
+      zeichneBoden();
+      zeichneVogel();
     };
 
     // ---------------- Ein Simulationsschritt ----------------
@@ -607,54 +548,40 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
 
       if (statusRef.current === "running") {
         update();
-        groundX.current += TOWER_SPEED;
-        bgX.current += TOWER_SPEED * 0.4;
+        groundX.current += PIPE_SPEED;
+        bgX.current += PIPE_SPEED * 0.4;
       } else if (statusRef.current === "ready") {
-        // Schweben: 4,8 Radiant pro Sekunde, 8 Pixel Ausschlag
-        plane.current.y =
-          HEIGHT / 2 + Math.sin(simZeit.current * 4.8) * 8;
-        plane.current.v = 0;
-        groundX.current += TOWER_SPEED;
-        bgX.current += TOWER_SPEED * 0.4;
-      }
-
-      if (funken.current.length > 0) {
-        explosionSchritt.current += 1;
-        funken.current.forEach((k) => {
-          k.x += k.vx;
-          k.y += k.vy;
-          k.vy += EXPL_GRAVITY;
-          k.vx *= EXPL_DRAG;
-          k.r *= EXPL_SHRINK;
-          k.leben -= 1;
-        });
-        funken.current = funken.current.filter((k) => k.leben > 0);
+        // Im Startzustand schwebt der Vogel sanft auf und ab
+        bird.current.y =
+          HEIGHT / 2 + Math.sin(simZeit.current * SCHWEBE_TEMPO) * 8;
+        bird.current.v = 0;
+        groundX.current += PIPE_SPEED;
+        bgX.current += PIPE_SPEED * 0.4;
       }
     };
 
     // ---------------- Hauptschleife ----------------
     let letzteZeit = performance.now();
-    let akku = 0;
+    let akku = 0;   // angesammelte, noch nicht verrechnete Zeit
 
     const loop = (jetzt: number) => {
       let delta = jetzt - letzteZeit;
       letzteZeit = jetzt;
 
-      // Nach einem Tab-Wechsel oder Haltepunkt im Debugger wäre delta sehr
-      // groß. Dann wird ein einzelner Schritt gerechnet statt tausender.
+      // Nach einem Tab-Wechsel oder einem Haltepunkt im Debugger wäre delta
+      // sehr groß. Dann lieber einen Schritt rechnen als tausende.
       if (delta > 250) delta = STEP;
 
       akku += delta;
 
-      // So viele Schritte wie nötig, höchstens MAX_STEPS. Bei 360 Hz ist
-      // das ein Schritt pro Bild, bei 60 Hz sechs, bei 30 Hz zwölf.
+      // So viele Schritte wie Zeit vergangen ist, höchstens MAX_STEPS
       let schritte = 0;
       while (akku >= STEP && schritte < MAX_STEPS) {
         tick();
         akku -= STEP;
         schritte += 1;
       }
-      // Reste verwerfen, falls das Gerät nicht mitkommt
+      // Kommt das Gerät nicht mit, wird der Rest verworfen statt aufgestaut
       if (schritte === MAX_STEPS) akku = 0;
 
       draw();
@@ -669,7 +596,7 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex w-full max-w-3xl flex-col items-center gap-6 px-6 py-16">
         <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-zinc-50">
-          9-11-Simulator
+          Flattervogel
         </h1>
 
         <div
@@ -677,11 +604,16 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
           className="relative cursor-pointer select-none overflow-hidden rounded-2xl border border-solid border-[#4169E1] touch-none"
           style={{ width: WIDTH, height: HEIGHT }}
         >
-          <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} />
+          {/* Die Pixelgröße setzt der Effekt anhand des Gerätefaktors.
+              Hier wird nur die Anzeigegröße festgelegt. */}
+          <canvas
+            ref={canvasRef}
+            style={{ width: WIDTH, height: HEIGHT, display: "block" }}
+          />
 
           <div
             className="pointer-events-none absolute left-0 top-6 w-full text-center text-5xl font-extrabold text-white"
-            style={{ WebkitTextStroke: "3px #2b3340" }}
+            style={{ WebkitTextStroke: "3px #3b2d1a" }}
           >
             {score}
           </div>
@@ -690,20 +622,20 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-end gap-2 pb-40 text-center text-white">
               <p
                 className="text-3xl font-extrabold"
-                style={{ WebkitTextStroke: "2px #2b3340" }}
+                style={{ WebkitTextStroke: "2px #3b2d1a" }}
               >
-                Bereit zum Start?
+                Bereit?
               </p>
               <p className="rounded-full bg-black/40 px-4 py-1 text-sm">
-                Klicken oder Leertaste zum Steigen
+                Klicken oder Leertaste zum Flattern
               </p>
             </div>
           )}
 
           {status === "over" && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="rounded-2xl border-2 border-[#2b3340] bg-[#dfe4ec] px-8 py-6 text-center text-[#2b3340] shadow-lg">
-                <p className="text-2xl font-extrabold">Flug beendet</p>
+              <div className="rounded-2xl border-2 border-[#3b2d1a] bg-[#ded895] px-8 py-6 text-center text-[#3b2d1a] shadow-lg">
+                <p className="text-2xl font-extrabold">Vorbei</p>
                 <p className="mt-2 text-lg">Punkte: {score}</p>
                 <p className="text-lg">Bestleistung: {best}</p>
                 <p className="mt-3 text-sm">Klicken für einen neuen Versuch</p>
@@ -718,7 +650,7 @@ function SkylineDash({ onBeenden }: { onBeenden: () => void }) {
             onClick={flap}
             className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-[#4169E1] bg-[#4169E1] px-5 text-white transition-colors hover:bg-[#27408B] md:w-[158px]"
           >
-            {status === "running" ? "Steigen" : "Start"}
+            {status === "running" ? "Flattern" : "Start"}
           </button>
           <button
             type="button"
