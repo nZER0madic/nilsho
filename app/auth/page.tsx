@@ -15,15 +15,15 @@ import {
 import { auth } from "@/lib/firebase";
 
 // Schlüssel im localStorage: merkt sich die Adresse, an die der Link ging
-const EMAIL_SPEICHER = "emailFuerAnmeldung";
+const EMAIL_STORAGE_KEY = "emailForSignIn";
 
-type Methode = "passwort" | "link";
-type Modus = "anmelden" | "registrieren";
+type SignInMethod = "password" | "emailLink";
+type AuthMode = "signIn" | "signUp";
 
 // Übersetzt Firebase-Fehlercodes in verständliche Meldungen
-function fehlertext(e: unknown) {
-  if (e instanceof FirebaseError) {
-    switch (e.code) {
+function getErrorMessage(error: unknown) {
+  if (error instanceof FirebaseError) {
+    switch (error.code) {
       case "auth/invalid-email":
         return "Die E-Mail-Adresse ist ungültig.";
       case "auth/invalid-credential":
@@ -54,125 +54,150 @@ function fehlertext(e: unknown) {
 
 export default function AuthPage() {
   const router = useRouter();
-  const [methode, setMethode] = useState<Methode>("passwort");
-  const [modus, setModus] = useState<Modus>("anmelden");
+  const [signInMethod, setSignInMethod] = useState<SignInMethod>("password");
+  const [authMode, setAuthMode] = useState<AuthMode>("signIn");
   const [email, setEmail] = useState("");
-  const [passwort, setPasswort] = useState("");
-  const [laedt, setLaedt] = useState(false);
-  const [fehler, setFehler] = useState("");
-  const [info, setInfo] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [infoMessage, setInfoMessage] = useState("");
 
   // true, wenn die Seite über einen Anmeldelink geöffnet wurde, die Adresse
   // aber nicht gespeichert ist (z. B. Link auf anderem Gerät geöffnet)
-  const [linkBestaetigen, setLinkBestaetigen] = useState(false);
+  const [needsEmailConfirmation, setNeedsEmailConfirmation] = useState(false);
 
-  // Schutz gegen doppelte Ausführung im React Strict Mode – ein Link
-  // ist nur einmal gültig
-  const linkVerarbeitet = useRef(false);
+  // Schutz gegen doppelte Ausführung im React Strict Mode –
+  // ein Link ist nur einmal gültig
+  const hasProcessedEmailLink = useRef(false);
+
+  function clearMessages() {
+    setErrorMessage("");
+    setInfoMessage("");
+  }
 
   // Bereits angemeldet? Dann direkt zur Hauptseite
   useEffect(() => {
-    const abmelden = onAuthStateChanged(auth, (u) => {
-      if (u) router.replace("/");
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (currentUser) router.replace("/");
     });
-    return abmelden;
+    return unsubscribe;
   }, [router]);
 
   // Anmeldelink aus der E-Mail verarbeiten
   useEffect(() => {
-    if (linkVerarbeitet.current) return;
-    linkVerarbeitet.current = true;
+    if (hasProcessedEmailLink.current) return;
+    hasProcessedEmailLink.current = true;
 
     if (!isSignInWithEmailLink(auth, window.location.href)) return;
 
-    const gespeichert = window.localStorage.getItem(EMAIL_SPEICHER);
-    if (gespeichert) {
-      linkAbschliessen(gespeichert);
+    const storedEmail = window.localStorage.getItem(EMAIL_STORAGE_KEY);
+    if (storedEmail) {
+      completeEmailLinkSignIn(storedEmail);
     } else {
-      setMethode("link");
-      setLinkBestaetigen(true);
-      setInfo("Bitte bestätige Deine E-Mail-Adresse, um die Anmeldung abzuschließen.");
+      setSignInMethod("emailLink");
+      setNeedsEmailConfirmation(true);
+      setInfoMessage(
+        "Bitte bestätige Deine E-Mail-Adresse, um die Anmeldung abzuschließen."
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function linkAbschliessen(adresse: string) {
-    setLaedt(true);
-    setFehler("");
+  async function completeEmailLinkSignIn(emailAddress: string) {
+    setIsLoading(true);
+    setErrorMessage("");
     try {
-      await signInWithEmailLink(auth, adresse, window.location.href);
-      window.localStorage.removeItem(EMAIL_SPEICHER);
+      await signInWithEmailLink(auth, emailAddress, window.location.href);
+      window.localStorage.removeItem(EMAIL_STORAGE_KEY);
       router.replace("/");
-    } catch (e) {
-      setFehler(fehlertext(e));
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
     } finally {
-      setLaedt(false);
+      setIsLoading(false);
     }
   }
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setFehler("");
-    setInfo("");
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    clearMessages();
 
-    const adresse = email.trim();
-    if (!adresse) {
-      setFehler("Bitte E-Mail-Adresse eingeben.");
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setErrorMessage("Bitte E-Mail-Adresse eingeben.");
       return;
     }
 
-    if (linkBestaetigen) {
-      await linkAbschliessen(adresse);
+    if (needsEmailConfirmation) {
+      await completeEmailLinkSignIn(trimmedEmail);
       return;
     }
 
-    setLaedt(true);
+    setIsLoading(true);
     try {
-      if (methode === "link") {
+      if (signInMethod === "emailLink") {
         // Der Link führt zurück auf diese Seite, die ihn dann einlöst
-        await sendSignInLinkToEmail(auth, adresse, {
+        await sendSignInLinkToEmail(auth, trimmedEmail, {
           url: `${window.location.origin}/auth`,
           handleCodeInApp: true,
         });
-        window.localStorage.setItem(EMAIL_SPEICHER, adresse);
-        setInfo(`Link gesendet an ${adresse}. Bitte Postfach und Spam-Ordner prüfen.`);
-      } else if (modus === "anmelden") {
-        await signInWithEmailAndPassword(auth, adresse, passwort);
+        window.localStorage.setItem(EMAIL_STORAGE_KEY, trimmedEmail);
+        setInfoMessage(
+          `Link gesendet an ${trimmedEmail}. Bitte Postfach und Spam-Ordner prüfen.`
+        );
+      } else if (authMode === "signIn") {
+        await signInWithEmailAndPassword(auth, trimmedEmail, password);
         router.replace("/");
       } else {
-        await createUserWithEmailAndPassword(auth, adresse, passwort);
+        await createUserWithEmailAndPassword(auth, trimmedEmail, password);
         router.replace("/");
       }
-    } catch (err) {
-      setFehler(fehlertext(err));
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
     } finally {
-      setLaedt(false);
+      setIsLoading(false);
     }
   }
 
-  async function handlePasswortVergessen() {
-    setFehler("");
-    setInfo("");
-    const adresse = email.trim();
-    if (!adresse) {
-      setFehler("Bitte zuerst die E-Mail-Adresse eingeben.");
+  async function handlePasswordReset() {
+    clearMessages();
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setErrorMessage("Bitte zuerst die E-Mail-Adresse eingeben.");
       return;
     }
     try {
-      await sendPasswordResetEmail(auth, adresse);
-      setInfo(`Falls ein Konto existiert, wurde eine E-Mail an ${adresse} gesendet.`);
-    } catch (err) {
-      setFehler(fehlertext(err));
+      await sendPasswordResetEmail(auth, trimmedEmail);
+      setInfoMessage(
+        `Falls ein Konto existiert, wurde eine E-Mail an ${trimmedEmail} gesendet.`
+      );
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
     }
   }
 
-  const buttonText = linkBestaetigen
+  function toggleAuthMode() {
+    setAuthMode(authMode === "signIn" ? "signUp" : "signIn");
+    clearMessages();
+  }
+
+  const submitButtonLabel = needsEmailConfirmation
     ? "Anmeldung abschließen"
-    : methode === "link"
+    : signInMethod === "emailLink"
       ? "Link senden"
-      : modus === "anmelden"
+      : authMode === "signIn"
         ? "Anmelden"
         : "Konto erstellen";
+
+  const showPasswordForm = signInMethod === "password" && !needsEmailConfirmation;
+  const showEmailLinkHint = signInMethod === "emailLink" && !needsEmailConfirmation;
+
+  // Horizontale Streifen in der unteren Hälfte der Sonne, typisch für den 80er-Look
+  const sunStripeMask =
+    "linear-gradient(to bottom, #000 0 55%, transparent 55% 59%, #000 59% 67%, transparent 67% 72%, #000 72% 79%, transparent 79% 85%, #000 85% 90%, transparent 90% 97%, #000 97%)";
+  const gridFadeMask = "linear-gradient(to top, #000 30%, transparent)";
+
+  const inputClassName =
+    "h-12 rounded-2xl border border-sky-200 bg-white/80 px-4 text-sky-950 outline-none transition placeholder:text-sky-300 focus:border-[#ff4fa3] focus:ring-4 focus:ring-[#ff4fa3]/20";
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-b from-[#9be7ff] via-[#d6f4ff] to-[#ffd1ea] px-4 py-12 font-sans">
@@ -182,11 +207,8 @@ export default function AuthPage() {
         className="pointer-events-none absolute left-1/2 top-[8%] h-80 w-80 -translate-x-1/2 rounded-full opacity-80"
         style={{
           background: "linear-gradient(to bottom, #ff4fa3, #ff8ac4 45%, #ffb86b)",
-          // Horizontale Streifen in der unteren Hälfte, typisch für den 80er-Look
-          maskImage:
-            "linear-gradient(to bottom, #000 0 55%, transparent 55% 59%, #000 59% 67%, transparent 67% 72%, #000 72% 79%, transparent 79% 85%, #000 85% 90%, transparent 90% 97%, #000 97%)",
-          WebkitMaskImage:
-            "linear-gradient(to bottom, #000 0 55%, transparent 55% 59%, #000 59% 67%, transparent 67% 72%, #000 72% 79%, transparent 79% 85%, #000 85% 90%, transparent 90% 97%, #000 97%)",
+          maskImage: sunStripeMask,
+          WebkitMaskImage: sunStripeMask,
         }}
       />
 
@@ -200,15 +222,15 @@ export default function AuthPage() {
           backgroundSize: "60px 40px",
           transform: "translateX(-50%) perspective(400px) rotateX(60deg)",
           transformOrigin: "bottom",
-          maskImage: "linear-gradient(to top, #000 30%, transparent)",
-          WebkitMaskImage: "linear-gradient(to top, #000 30%, transparent)",
+          maskImage: gridFadeMask,
+          WebkitMaskImage: gridFadeMask,
         }}
       />
 
       {/* ---------- Karte ---------- */}
       <div className="relative z-10 w-full max-w-md rounded-3xl border border-white/70 bg-white/65 p-8 shadow-[0_0_50px_rgba(255,79,163,0.30)] backdrop-blur-xl">
         <h1 className="bg-gradient-to-r from-[#1cb5e0] to-[#ff4fa3] bg-clip-text text-center text-4xl font-extrabold tracking-tight text-transparent">
-          {modus === "registrieren" && methode === "passwort"
+          {authMode === "signUp" && signInMethod === "password"
             ? "Konto erstellen"
             : "Willkommen"}
         </h1>
@@ -217,24 +239,23 @@ export default function AuthPage() {
         </p>
 
         {/* Umschalter zwischen den Methoden */}
-        {!linkBestaetigen && (
+        {!needsEmailConfirmation && (
           <div className="mt-6 grid grid-cols-2 gap-1 rounded-full bg-sky-100/80 p-1">
-            {(["passwort", "link"] as const).map((m) => (
+            {(["password", "emailLink"] as const).map((method) => (
               <button
-                key={m}
+                key={method}
                 type="button"
                 onClick={() => {
-                  setMethode(m);
-                  setFehler("");
-                  setInfo("");
+                  setSignInMethod(method);
+                  clearMessages();
                 }}
                 className={`h-10 rounded-full text-sm font-semibold transition-all ${
-                  methode === m
+                  signInMethod === method
                     ? "bg-white text-[#ff4fa3] shadow-[0_2px_12px_rgba(255,79,163,0.35)]"
                     : "text-sky-800/70 hover:text-sky-900"
                 }`}
               >
-                {m === "passwort" ? "E-Mail & Passwort" : "E-Mail-Link"}
+                {method === "password" ? "E-Mail & Passwort" : "E-Mail-Link"}
               </button>
             ))}
           </div>
@@ -249,20 +270,20 @@ export default function AuthPage() {
               type="email"
               autoComplete="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="max.mustermann@beispiel.de"
-              className="h-12 rounded-2xl border border-sky-200 bg-white/80 px-4 text-sky-950 outline-none transition placeholder:text-sky-300 focus:border-[#ff4fa3] focus:ring-4 focus:ring-[#ff4fa3]/20"
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="du@beispiel.de"
+              className={inputClassName}
             />
           </label>
 
-          {methode === "passwort" && !linkBestaetigen && (
+          {showPasswordForm && (
             <label className="flex flex-col gap-1.5">
               <span className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-sky-900/70">
                 Passwort
-                {modus === "anmelden" && (
+                {authMode === "signIn" && (
                   <button
                     type="button"
-                    onClick={handlePasswortVergessen}
+                    onClick={handlePasswordReset}
                     className="normal-case tracking-normal text-[#ff4fa3] hover:underline"
                   >
                     Vergessen?
@@ -271,56 +292,52 @@ export default function AuthPage() {
               </span>
               <input
                 type="password"
-                autoComplete={modus === "anmelden" ? "current-password" : "new-password"}
-                value={passwort}
-                onChange={(e) => setPasswort(e.target.value)}
+                autoComplete={authMode === "signIn" ? "current-password" : "new-password"}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
                 placeholder="••••••••"
-                className="h-12 rounded-2xl border border-sky-200 bg-white/80 px-4 text-sky-950 outline-none transition placeholder:text-sky-300 focus:border-[#ff4fa3] focus:ring-4 focus:ring-[#ff4fa3]/20"
+                className={inputClassName}
               />
             </label>
           )}
 
-          {methode === "link" && !linkBestaetigen && (
+          {showEmailLinkHint && (
             <p className="text-sm text-sky-900/70">
               Du bekommst einen Link per E-Mail – ein Klick darauf meldet Dich ohne Passwort an.
             </p>
           )}
 
           {/* Rückmeldungen */}
-          {fehler && (
+          {errorMessage && (
             <p className="rounded-2xl border border-[#ff4fa3]/40 bg-[#ff4fa3]/10 px-4 py-3 text-sm text-[#c2185b]">
-              {fehler}
+              {errorMessage}
             </p>
           )}
-          {info && (
+          {infoMessage && (
             <p className="rounded-2xl border border-sky-300 bg-sky-100/80 px-4 py-3 text-sm text-sky-900">
-              {info}
+              {infoMessage}
             </p>
           )}
 
           <button
             type="submit"
-            disabled={laedt}
+            disabled={isLoading}
             className="mt-2 h-12 rounded-2xl bg-gradient-to-r from-[#ff4fa3] to-[#ff7ac0] font-semibold text-white shadow-[0_6px_24px_rgba(255,79,163,0.45)] transition hover:shadow-[0_8px_32px_rgba(255,79,163,0.65)] hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {laedt ? "Bitte warten …" : buttonText}
+            {isLoading ? "Bitte warten …" : submitButtonLabel}
           </button>
         </form>
 
         {/* Wechsel zwischen Anmelden und Registrieren */}
-        {methode === "passwort" && !linkBestaetigen && (
+        {showPasswordForm && (
           <p className="mt-6 text-center text-sm text-sky-900/70">
-            {modus === "anmelden" ? "Noch kein Konto?" : "Schon registriert?"}{" "}
+            {authMode === "signIn" ? "Noch kein Konto?" : "Schon registriert?"}{" "}
             <button
               type="button"
-              onClick={() => {
-                setModus(modus === "anmelden" ? "registrieren" : "anmelden");
-                setFehler("");
-                setInfo("");
-              }}
+              onClick={toggleAuthMode}
               className="font-semibold text-[#ff4fa3] hover:underline"
             >
-              {modus === "anmelden" ? "Jetzt registrieren" : "Zur Anmeldung"}
+              {authMode === "signIn" ? "Jetzt registrieren" : "Zur Anmeldung"}
             </button>
           </p>
         )}

@@ -5,25 +5,30 @@ import { useRouter } from "next/navigation";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 
-export default function Home() {
+export default function HomePage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
-  const [laedt, setLaedt] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Prüft den Anmeldestatus. Nicht angemeldet → weiter zur Anmeldeseite.
   useEffect(() => {
-    const abmelden = onAuthStateChanged(auth, (u) => {
-      if (!u) {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (!currentUser) {
         router.replace("/auth");
         return;
       }
-      setUser(u);
-      setLaedt(false);
+      setUser(currentUser);
+      setIsLoading(false);
     });
-    return abmelden;
+    return unsubscribe;
   }, [router]);
 
-  if (laedt) {
+  async function handleSignOut() {
+    // Nach dem Abmelden leitet onAuthStateChanged automatisch zu /auth
+    await signOut(auth);
+  }
+
+  if (isLoading) {
     return (
       <main className="flex min-h-screen items-center justify-center text-zinc-500">
         Lädt …
@@ -37,10 +42,9 @@ export default function Home() {
       <p className="text-zinc-600">
         Angemeldet als <span className="font-medium">{user?.email}</span>
       </p>
-      {/* Nach dem Abmelden leitet onAuthStateChanged automatisch zu /auth */}
       <button
         type="button"
-        onClick={() => signOut(auth)}
+        onClick={handleSignOut}
         className="h-11 rounded-full border border-[#ff4fa3] px-6 font-medium text-[#ff4fa3] transition-colors hover:bg-[#ff4fa3] hover:text-white"
       >
         Abmelden
