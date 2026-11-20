@@ -150,7 +150,7 @@ const GROUND = 96;        // Bodenstreifen inkl. Grasnarbe
 
 // ---- Flugverhalten: unverändert übernommen ----
 const GRAVITY = 0.018;
-const JUMP = -2.3;
+const JUMP = -2.1;
 const MAX_FALL = 7.5;
 
 const BIRD_X = 90;
